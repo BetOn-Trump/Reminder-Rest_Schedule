@@ -2,4 +2,4 @@
 
 使用示例：
 
-![使用示例](example.png)
+![使用示例](Example.jpg)
