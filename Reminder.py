@@ -13,8 +13,8 @@ class RestReminder:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("休息提醒 & 日程(by Donald J.Trump,20260920)")
-        self.root.geometry("550x640")
-        self.root.minsize(460, 640)
+        self.root.geometry("550x680")
+        self.root.minsize(460, 680)
         self.root.resizable(True, True)
 
         # ---------- 数据文件路径 ----------
@@ -28,6 +28,9 @@ class RestReminder:
         self.tasks = []
         self.last_task_check = None
         self.is_topmost = False
+        # 到点提醒状态（每天重置）
+        self._reminded_date = None
+        self._reminded_ids = set()
         self.load_data()
 
         # ---------- 图标 ----------
@@ -55,6 +58,7 @@ class RestReminder:
         # ---------- 首次刷新 + 启动每分钟循环 ----------
         self.refresh_tasks()
         self.daily_task_check()
+        self.check_timed_tasks()
         self.root.after(60000, self.periodic_tick)
 
     # ==================================================
@@ -73,41 +77,31 @@ class RestReminder:
                         font=("Microsoft YaHei", 12, "bold"))
 
         # ---------- 标题栏（标题 + 置顶按钮） ----------
-        
-        # ---------- 标题栏（标题 + 置顶按钮）----------
-
-        # 1. 创建一个新的、专门用于放置标题的 Frame
         title_bar = tk.Frame(self.root)
-        # 使用 pack 布局，fill="x" 让它横向填满，expand=True 让它占据所有空间，从而实现居中
         title_bar.pack(fill="x", pady=(8, 2))
 
-        # 2. 将标题 Label 放入这个新的 title_bar 中
         tk.Label(
-            title_bar, 
-            text="休息提醒 & 日程", 
+            title_bar,
+            text="休息提醒 & 日程",
             font=("Microsoft YaHei", 15, "bold")
-        ).pack() # 默认就是居中，无需额外参数
+        ).pack()
 
-        # 3. 创建另一个新的、专门用于放置“置顶”按钮的 Frame
         topmost_frame = tk.Frame(self.root)
-        # 使用 place 布局，relx=1.0 和 rely=0 将其定位在父容器(self.root)的右上角
-        # anchor="ne" 表示以组件的右上角为锚点进行定位
-        topmost_frame.place(relx=1.0, rely=0, anchor="ne", x=-12, y=10) # x=-12 是为了留出一点右边距
+        topmost_frame.place(relx=1.0, rely=0, anchor="ne", x=-12, y=10)
 
-        # 4. 将“置顶”按钮放入这个新的 topmost_frame 中
         self.topmost_btn = tk.Button(
-            topmost_frame, 
-            text="置顶", 
-            command=self.toggle_topmost, 
-            font=("Microsoft YaHei", 10), 
-            relief="flat", 
-            bd=0, 
-            bg="#f0f0f0", 
-            fg="#666666", 
-            activebackground="#e0e0e0", 
-            activeforeground="#333333", 
-            cursor="hand2", 
-            padx=10, 
+            topmost_frame,
+            text="置顶",
+            command=self.toggle_topmost,
+            font=("Microsoft YaHei", 10),
+            relief="flat",
+            bd=0,
+            bg="#f0f0f0",
+            fg="#666666",
+            activebackground="#e0e0e0",
+            activeforeground="#333333",
+            cursor="hand2",
+            padx=10,
             pady=1
         )
         self.topmost_btn.pack()
@@ -179,29 +173,47 @@ class RestReminder:
         task_frame = ttk.LabelFrame(self.root, text="事件 / ddl", padding=8)
         task_frame.pack(fill="both", expand=True, padx=20, pady=6)
 
-        # 输入行
+        # ---- 输入行 1：任务名 ----
         input_row = ttk.Frame(task_frame)
-        input_row.pack(fill="x", pady=(0, 6))
+        input_row.pack(fill="x", pady=(0, 4))
 
         self.task_name_var = tk.StringVar()
-        self.task_date_var = tk.StringVar()
-
         self.name_entry = ttk.Entry(
             input_row, textvariable=self.task_name_var
         )
         self.name_entry.pack(side=tk.LEFT, fill="x", expand=True)
 
+        # ---- 输入行 2：日期(可选) + 时间(可选) + 重要 + 添加 ----
+        opt_row = ttk.Frame(task_frame)
+        opt_row.pack(fill="x", pady=(0, 6))
+
+        self.task_date_var = tk.StringVar()
+        self.task_time_var = tk.StringVar()
+        self.task_important_var = tk.BooleanVar(value=False)
+
+        ttk.Label(opt_row, text="日期:").pack(side=tk.LEFT)
         self.date_entry = ttk.Entry(
-            input_row, textvariable=self.task_date_var, width=11
+            opt_row, textvariable=self.task_date_var, width=10
         )
-        self.date_entry.pack(side=tk.LEFT, padx=4)
+        self.date_entry.pack(side=tk.LEFT, padx=(2, 8))
+
+        ttk.Label(opt_row, text="时间:").pack(side=tk.LEFT)
+        self.time_entry = ttk.Entry(
+            opt_row, textvariable=self.task_time_var, width=6
+        )
+        self.time_entry.pack(side=tk.LEFT, padx=(2, 8))
+
+        ttk.Checkbutton(
+            opt_row, text="重要", variable=self.task_important_var
+        ).pack(side=tk.LEFT, padx=(0, 8))
 
         ttk.Button(
-            input_row, text="添加", width=6, command=self.add_task
+            opt_row, text="添加", width=6, command=self.add_task
         ).pack(side=tk.LEFT)
 
         self.name_entry.bind("<Return>", lambda e: self.add_task())
         self.date_entry.bind("<Return>", lambda e: self.add_task())
+        self.time_entry.bind("<Return>", lambda e: self.add_task())
 
         # 滚动列表
         list_wrap = ttk.Frame(task_frame)
@@ -265,6 +277,7 @@ class RestReminder:
         log_sb.pack(side="right", fill="y")
 
         self.log("程序已启动，点击“开始计时”来启动提醒")
+        self.log("日程：日期/时间均可留空；留空日期请勾选「重要」")
 
     # ==================================================
     #  日程：数据读写
@@ -307,7 +320,7 @@ class RestReminder:
             self.log(f"保存日程失败: {e}")
 
     # ==================================================
-    #  日程：日期解析
+    #  日程：日期 / 时间解析
     # ==================================================
     @staticmethod
     def parse_date(s):
@@ -342,6 +355,42 @@ class RestReminder:
         raise ValueError("日期格式不正确")
 
     @staticmethod
+    def parse_time(s):
+        """解析具体时刻，返回 'HH:MM'。
+        支持：23:59 / 23：59 / 9:5 / 2359 / 930 / 23 / 9点30 / 23时59分
+        输入为空返回 None
+        """
+        raw = (s or "").strip()
+        if not raw:
+            return None
+        raw = (raw.replace("：", ":")
+                  .replace("时", ":")
+                  .replace("点", ":")
+                  .replace("分", "")
+                  .strip(": "))
+
+        if ":" in raw:
+            parts = [p.strip() for p in raw.split(":") if p.strip() != ""]
+            if len(parts) != 2:
+                raise ValueError("时间格式不正确")
+            h, m = int(parts[0]), int(parts[1])
+        else:
+            if not raw.isdigit():
+                raise ValueError("时间格式不正确")
+            if len(raw) <= 2:
+                h, m = int(raw), 0
+            elif len(raw) == 3:
+                h, m = int(raw[0]), int(raw[1:])
+            elif len(raw) == 4:
+                h, m = int(raw[:2]), int(raw[2:])
+            else:
+                raise ValueError("时间格式不正确")
+
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError("时间超出范围")
+        return f"{h:02d}:{m:02d}"
+
+    @staticmethod
     def fmt_due(due):
         today = date.today()
         if due.year == today.year:
@@ -354,35 +403,62 @@ class RestReminder:
     def add_task(self):
         name = self.task_name_var.get().strip()
         ds = self.task_date_var.get().strip()
+        ts = self.task_time_var.get().strip()
+        important = bool(self.task_important_var.get())
 
         if not name:
             self.log("请输入任务名称")
             self.name_entry.focus_set()
             return
-        if not ds:
-            self.log("请输入截止日期，例如 9.26")
-            self.date_entry.focus_set()
-            return
 
-        try:
-            due = self.parse_date(ds)
-        except Exception:
-            self.log(f"无法识别的日期：{ds}")
-            return
+        # ---- 日期（可选） ----
+        due = None
+        if ds:
+            try:
+                due = self.parse_date(ds)
+            except Exception:
+                self.log(f"无法识别的日期：{ds}")
+                self.date_entry.focus_set()
+                return
+
+        # ---- 时间（可选，必须先有日期） ----
+        t = None
+        if ts:
+            if due is None:
+                self.log("填写具体时间前，请先填写日期")
+                self.date_entry.focus_set()
+                return
+            try:
+                t = self.parse_time(ts)
+            except Exception:
+                self.log(f"无法识别的时间：{ts}")
+                self.time_entry.focus_set()
+                return
 
         self.tasks.append({
             "id": f"{int(time.time() * 1000)}-{len(self.tasks)}",
             "name": name,
-            "due": due.isoformat(),
+            "due": due.isoformat() if due else None,
+            "time": t,
+            "important": important,
         })
 
         self.task_name_var.set("")
         self.task_date_var.set("")
+        self.task_time_var.set("")
+        self.task_important_var.set(False)
         self.name_entry.focus_set()
 
         self.save_data()
         self.refresh_tasks()
-        self.log(f"已添加日程：{self.fmt_due(due)} {name}")
+
+        if due:
+            desc = self.fmt_due(due) + (f" {t}" if t else "")
+        else:
+            desc = "无期限"
+        if important:
+            desc += " ★"
+        self.log(f"已添加日程：{desc} {name}")
 
     def delete_task(self, tid):
         task = next((t for t in self.tasks if t.get("id") == tid), None)
@@ -413,12 +489,23 @@ class RestReminder:
 
         items = []
         for t in self.tasks:
-            try:
-                due = date.fromisoformat(t["due"])
-            except Exception:
-                continue
+            due = None
+            if t.get("due"):
+                try:
+                    due = date.fromisoformat(t["due"])
+                except Exception:
+                    due = None
             items.append((due, t))
-        items.sort(key=lambda x: x[0])
+
+        # 有日期的按日期升序；无日期的排最后（其中重要的靠前）
+        def sort_key(item):
+            d, t = item
+            imp = 0 if t.get("important") else 1
+            if d is None:
+                return (2, date.max, imp)
+            return (1, d, imp)
+
+        items.sort(key=sort_key)
 
         if not items:
             tk.Label(
@@ -430,55 +517,80 @@ class RestReminder:
             return
 
         for due, t in items:
-            d = (due - today).days
+            important = bool(t.get("important"))
+            timestr = t.get("time") or ""
 
-            if d < 0:
-                bg, fg = "#ffe5e5", "#c0392b"
-                remain = f"已过期 {-d} 天"
-            elif d == 0:
-                bg, fg = "#ffe0cc", "#d35400"
-                remain = "今天截止"
-            elif d == 1:
-                bg, fg = "#fff1cc", "#b8860b"
-                remain = "明天截止"
-            elif d <= 3:
-                bg, fg = "#fff8e1", "#a67c00"
-                remain = f"还有 {d} 天"
+            if due is None:
+                date_text = "—"
+                if important:
+                    bg, fg = "#f3e8ff", "#6b21a8"
+                    remain = "重要"
+                else:
+                    bg, fg = "#f7f7f7", "#888888"
+                    remain = "无期限"
             else:
-                bg, fg = "#ffffff", "#333333"
-                remain = f"还有 {d} 天"
+                d = (due - today).days
+                date_text = self.fmt_due(due)
+
+                if d < 0:
+                    bg, fg = "#ffe5e5", "#c0392b"
+                    remain = f"已过期 {-d} 天"
+                elif d == 0:
+                    bg, fg = "#ffe0cc", "#d35400"
+                    remain = "今天截止"
+                elif d == 1:
+                    bg, fg = "#fff1cc", "#b8860b"
+                    remain = "明天截止"
+                elif d <= 3:
+                    bg, fg = "#fff8e1", "#a67c00"
+                    remain = f"还有 {d} 天"
+                else:
+                    bg, fg = "#ffffff", "#333333"
+                    remain = f"还有 {d} 天"
+
+                if important and d > 3:
+                    bg = "#faf5ff"
+                    fg = "#6b21a8"
 
             row = tk.Frame(self.task_inner, bg=bg)
             row.pack(fill="x", padx=2, pady=1)
             row.grid_columnconfigure(1, weight=1)
 
             tk.Label(
-                row, text=self.fmt_due(due), bg=bg, fg=fg,
+                row, text=date_text, bg=bg, fg=fg,
                 width=9, anchor="w",
                 font=("Microsoft YaHei", 12, "bold")
             ).grid(row=0, column=0, sticky="w", padx=(4, 2), pady=4)
 
             display_name = t["name"]
+            if important:
+                display_name = "★ " + display_name
             if len(display_name) > 22:
                 display_name = display_name[:21] + "…"
 
             tk.Label(
                 row, text=display_name, bg=bg, fg=fg,
                 anchor="w",
-                font=("Microsoft YaHei", 12)
+                font=("Microsoft YaHei", 12,
+                      "bold" if important else "normal")
             ).grid(row=0, column=1, sticky="we", padx=4)
+
+            tk.Label(
+                row, text=timestr, bg=bg, fg=fg, width=6,
+                font=("Microsoft YaHei", 11, "bold")
+            ).grid(row=0, column=2, padx=2)
 
             tk.Label(
                 row, text=remain, bg=bg, fg=fg,
                 font=("Microsoft YaHei", 12, "bold")
-            ).grid(row=0, column=2, padx=6)
+            ).grid(row=0, column=3, padx=6)
 
             del_lbl = tk.Label(
                 row, text="×", bg=bg, fg="#999",
                 cursor="hand2", width=2,
                 font=("Microsoft YaHei", 14)
             )
-            del_lbl.grid(row=0, column=3, padx=(0, 4))
+            del_lbl.grid(row=0, column=4, padx=(0, 4))
             del_lbl.bind(
                 "<Button-1>",
                 lambda e, tid=t.get("id"): self.delete_task(tid)
@@ -499,32 +611,101 @@ class RestReminder:
         self.save_data()
 
         urgent = []
+        important_undated = []
+
         for t in self.tasks:
-            try:
-                due = date.fromisoformat(t["due"])
-            except Exception:
+            due = None
+            if t.get("due"):
+                try:
+                    due = date.fromisoformat(t["due"])
+                except Exception:
+                    due = None
+
+            if due is None:
+                if t.get("important"):
+                    important_undated.append(t["name"])
                 continue
+
             d = (due - today).days
+            timestr = f" {t['time']}" if t.get("time") else ""
+
             if d < 0:
                 urgent.append((d, f"「{t['name']}」已过期 {-d} 天"))
             elif d == 0:
-                urgent.append((d, f"「{t['name']}」今天截止"))
+                urgent.append((d, f"「{t['name']}」今天{timestr}截止"))
             elif d == 1:
-                urgent.append((d, f"「{t['name']}」明天截止"))
-
-        if not urgent:
-            return
+                urgent.append((d, f"「{t['name']}」明天{timestr}截止"))
 
         urgent.sort(key=lambda x: x[0])
-        msg = "\n".join(x[1] for x in urgent)
-        self.show_notification("日程提醒", msg)
-        self.log(f"日程提醒：{len(urgent)} 项临近或已过期")
+
+        lines = [x[1] for x in urgent]
+        if important_undated:
+            if lines:
+                lines.append("")
+            lines.append("重要事项（无截止日期）：")
+            lines.extend(f"· {n}" for n in important_undated)
+
+        if not lines:
+            return
+
+        self.show_notification("日程提醒", "\n".join(lines))
+        self.log(
+            f"日程提醒：{len(urgent)} 项临近或已过期，"
+            f"{len(important_undated)} 项重要事项"
+        )
+
+    def check_timed_tasks(self):
+        """每分钟检查：今天带具体时间的日程，到点前 10 分钟提醒一次"""
+        now = datetime.now()
+        if self._reminded_date != now.date():
+            self._reminded_date = now.date()
+            self._reminded_ids = set()
+
+        for t in self.tasks:
+            if not t.get("time") or not t.get("due"):
+                continue
+            tid = t.get("id")
+            if tid in self._reminded_ids:
+                continue
+
+            try:
+                due = date.fromisoformat(t["due"])
+                hh, mm = t["time"].split(":")
+                due_dt = datetime(
+                    due.year, due.month, due.day, int(hh), int(mm)
+                )
+            except Exception:
+                continue
+
+            # 只处理今天的日程
+            if due_dt.date() != now.date():
+                continue
+
+            delta = (due_dt - now).total_seconds()
+            if delta > 600:          # 还没进入 10 分钟窗口
+                continue
+
+            self._reminded_ids.add(tid)
+
+            if delta > 60:
+                msg = (
+                    f"「{t['name']}」将于 {t['time']} 截止，"
+                    f"还有约 {int(delta // 60)} 分钟。"
+                )
+            elif delta > 0:
+                msg = f"「{t['name']}」马上就要到截止时间 {t['time']} 了！"
+            else:
+                msg = f"「{t['name']}」已过截止时间 {t['time']}，请尽快处理！"
+
+            self.show_notification("日程到点提醒", msg)
+            self.log(f"到点提醒：{t['name']} ({t['time']})")
 
     def periodic_tick(self):
         """每分钟刷新一次剩余天数，并在跨天时做每日提醒"""
         try:
             self.refresh_tasks()
             self.daily_task_check()
+            self.check_timed_tasks()
         except Exception as e:
             self.log(f"日程刷新失败: {e}")
         finally:
@@ -541,7 +722,6 @@ class RestReminder:
             pass
 
         if self.is_topmost:
-            # 激活态：绿色高亮，和微信的置顶按钮一致
             self.topmost_btn.config(
                 text="已置顶",
                 bg="#07c160", fg="white",
@@ -558,7 +738,7 @@ class RestReminder:
         """切换窗口永久置顶"""
         self.is_topmost = not self.is_topmost
         self.apply_topmost()
-        self.save_data()          # 记住设置，下次启动仍是置顶
+        self.save_data()
         if self.is_topmost:
             self.log("窗口已置顶，将始终显示在其他窗口前面")
         else:
@@ -581,12 +761,15 @@ class RestReminder:
     #  日志
     # ==================================================
     def log(self, message):
+        if not hasattr(self, "log_text"):
+            print(message)
+            return
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
         self.log_text.see(tk.END)
 
     # ==================================================
-    #  计时相关（沿用上一版修复后的状态机）
+    #  计时相关
     # ==================================================
     def format_seconds(self, seconds):
         seconds = int(max(0, seconds))
@@ -760,13 +943,13 @@ class RestReminder:
             try:
                 win = tk.Toplevel(self.root)
                 win.title(title)
-                win.geometry("400x220")
+                win.geometry("400x240")
                 win.resizable(False, False)
                 win.attributes("-topmost", True)
 
                 win.update_idletasks()
                 x = (win.winfo_screenwidth() - 400) // 2
-                y = (win.winfo_screenheight() - 220) // 2
+                y = (win.winfo_screenheight() - 240) // 2
                 win.geometry(f"+{x}+{y}")
 
                 tk.Label(
@@ -774,7 +957,7 @@ class RestReminder:
                 ).pack(pady=(12, 4))
 
                 text_wrap = tk.Text(
-                    win, height=6, wrap="word",
+                    win, height=7, wrap="word",
                     relief="flat", bg=win.cget("bg"),
                     font=("Arial", 11)
                 )
